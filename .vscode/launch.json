@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:wsgi}",
+            "name": "Debug wsgi",
+            "target": "wsgi",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug wsgi"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:wsgi}",
+            "name": "Release wsgi",
+            "target": "wsgi",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release wsgi"
+        }
+    ]
+}
