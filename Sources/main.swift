@@ -168,11 +168,10 @@ struct Environment: Codable {
         case wsgiRunOnce = "wsgi.run_once"
     }
 
-    var cString: Data {
+    var cString: String {
         let cString =
-            "{\"REQUEST_METHOD\":\"\(requestMethod)\",\"SCRIPT_NAME\":\"\(scriptName)\",\"PATH_INFO\":\"\(pathInfo)\",\"QUERY_STRING\":\"\(queryString)\",\"CONTENT_TYPE\":\"\(contentType)\",\"CONTENT_LENGTH\":\"\(contentLength)\",\"SERVER_NAME\":\"\(serverName)\",\"SERVER_PORT\":\"\(serverPort)\",\"SERVER_PROTOCOL\":\"\(serverProtocol)\",\"wsgi.version\":\"\(wsgiVersion)\",\"wsgi.url_scheme\":\"\(wsgiUrlScheme)\",\"wsgi.input\":\"\(wsgiInput)\",\"wsgi.errors\":\"\(wsgiErrors)\",\"wsgi.multithread\":\"\(wsgiMultithread)\",\"wsgi.multiprocess\":\"\(wsgiMultiprocess)\",\"wsgi.run_once\":\"\(wsgiRunOnce)\"}\n\n"
-        print(cString)
-        return cString.data(using: .utf8)!
+            "{\"REQUEST_METHOD\":\"\(requestMethod)\",\"SCRIPT_NAME\":\"\(scriptName)\",\"PATH_INFO\":\"\(pathInfo)\",\"QUERY_STRING\":\"\(queryString)\",\"CONTENT_TYPE\":\"\(contentType)\",\"CONTENT_LENGTH\":\"\(contentLength)\",\"SERVER_NAME\":\"\(serverName)\",\"SERVER_PORT\":\"\(serverPort)\",\"SERVER_PROTOCOL\":\"\(serverProtocol)\",\"wsgi.version\":\"\(wsgiVersion)\",\"wsgi.url_scheme\":\"\(wsgiUrlScheme)\",\"wsgi.input\":\"\(wsgiInput)\",\"wsgi.errors\":\"\(wsgiErrors)\",\"wsgi.multithread\":\"\(wsgiMultithread)\",\"wsgi.multiprocess\":\"\(wsgiMultiprocess)\",\"wsgi.run_once\":\"\(wsgiRunOnce)\"}\n"
+        return cString
     }
 
     init(data: Data) throws {
@@ -222,21 +221,39 @@ struct Environment: Codable {
     }
 }
 
-actor PythonSupervisor {
-    let pythonPath: FilePath =
-        "/Users/jeslyvarghese/Workspace/300Days/wsgi/env/bin/python"
-    let scriptPath: String =
-        "/Users/jeslyvarghese/Workspace/300Days/wsgi/swsgi_runtime.py"
+struct PythonSupervisor: ~Copyable {
+    let config: Configuration
+    struct SpawnConfiguration {
+        let execution: Execution
+        let writer: StandardInputWriter
+        let reader: () async -> AsyncBufferSequence
+    }
 
-    func send(content: String) async throws -> String {
-
-        let result = try await run(
-            .path(pythonPath),
-            input: .string(content),
-            output: .string(limit: 1024)
+    init(parentPath: String) async {
+        let executablePath = FilePath(parentPath + "/env/bin/python")
+        let scriptPath = parentPath + "/swsgi_runtime.py"
+        self.config = Configuration(
+            .path(executablePath),
+            arguments: [scriptPath],
+            workingDirectory: FilePath(parentPath)
         )
-        print(result)
-        return result.standardOutput!
+    }
+
+    consuming func spawn(
+        _ spwanContext: (SpawnConfiguration) async throws -> Void
+    ) async throws -> TerminationStatus {
+        return try await run(
+            config,
+            preferredBufferSize: 1024
+        ) { execution, input, output, _ in
+            try await spwanContext(
+                SpawnConfiguration(
+                    execution: execution,
+                    writer: input,
+                    reader: { output }
+                )
+            )
+        }.terminationStatus
     }
 }
 
@@ -266,29 +283,24 @@ struct App {
         try socket.bind()
         try socket.listen()
 
-        var supervisor: PythonSupervisor = PythonSupervisor()
+        let terminationResult = try await PythonSupervisor(
+            parentPath: "/Users/jesly/Workspace/swsgi/"
+        )
+        .spawn { context in
+            while true {
+                let connection = try socket.accept()
+                let payload = try connection.receive()
 
-        while true {
-            let connection = try socket.accept()
-            print("Accepted client connection)")
-            let payload = try connection.receive()
-            print("Received payload: \(payload)")
+                _ = try await context.writer.write(payload.cString)
 
-            do {
-                let responseData = try await supervisor.send(
-                    content: String(data: payload.cString, encoding: .utf8)
-                        ?? ""
-                )
-
-                print(
-                    "Received response from Python script: \(responseData) )"
-                )
-                try connection.send(data: responseData.data(using: .utf8)!)
-            } catch {
-                print("Error handling request: \(error)")
+                for try await line in await context.reader().lines() {
+                    print(line)
+                    try connection.send(data: line.data(using: .utf8)!)
+                }
             }
-
         }
+
+        print(terminationResult)
     }
 }
 

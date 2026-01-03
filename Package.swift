@@ -19,6 +19,13 @@ let package = Package(
       name: "wsgi",
       dependencies: [
         .product(name: "Subprocess", package: "swift-subprocess")
+      ],
+      exclude: [
+        "../__pycache__/",
+        "../env",
+        "../swsgi_runtime.py",
+        "../swsgi_worker.py",
+        "../myapp.log"
       ]
     )
   ],
